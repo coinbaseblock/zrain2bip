@@ -222,8 +222,7 @@
         setMnemonicLanguage();
         // Get the mnemonic phrase
         var phrase = DOM.phrase.val();
-        var phraseForSeed = decodeMnemonicIfRequired(phrase);
-        var errorText = findPhraseErrors(phraseForSeed);
+        var errorText = findPhraseErrors(phrase);
         if (errorText) {
             showValidationError(errorText);
             updateGeneratedPhraseQr("");
@@ -232,7 +231,7 @@
         updateGeneratedPhraseQr(phrase);
         // Calculate and display
         var passphrase = "";
-        calcBip32RootKeyFromSeed(phraseForSeed, passphrase);
+        calcBip32RootKeyFromSeed(phrase, passphrase);
         calcForDerivationPath();
     }
 
