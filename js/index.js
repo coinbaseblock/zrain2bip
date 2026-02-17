@@ -111,6 +111,8 @@
     function init() {
         // Events
         DOM.longpassphrase.on("input", delayedLongpassphraseChanged);
+        DOM.phrase.on("input", delayedPhraseChanged);
+        DOM.rootKey.on("input", delayedRootKeyChanged);
         DOM.network.on("change", networkChanged);
         DOM.bip32Client.on("change", bip32ClientChanged);
         DOM.entropy.on("input", delayedEntropyChanged);
@@ -217,13 +219,21 @@
         phraseChangeTimeoutEvent = setTimeout(phraseChanged, 400);
     }
 
+    function delayedRootKeyChanged() {
+        hideValidationError();
+        showPending();
+        if (rootKeyChangedTimeoutEvent != null) {
+            clearTimeout(rootKeyChangedTimeoutEvent);
+        }
+        rootKeyChangedTimeoutEvent = setTimeout(rootKeyChanged, 400);
+    }
+
     function phraseChanged() {
         showPending();
         setMnemonicLanguage();
         // Get the mnemonic phrase
         var phrase = DOM.phrase.val();
-        var phraseForSeed = decodeMnemonicIfRequired(phrase);
-        var errorText = findPhraseErrors(phraseForSeed);
+        var errorText = findPhraseErrors(phrase);
         if (errorText) {
             showValidationError(errorText);
             updateGeneratedPhraseQr("");
@@ -232,13 +242,17 @@
         updateGeneratedPhraseQr(phrase);
         // Calculate and display
         var passphrase = "";
-        calcBip32RootKeyFromSeed(phraseForSeed, passphrase);
+        calcBip32RootKeyFromSeed(phrase, passphrase);
         calcForDerivationPath();
     }
 
     function encodingModeChanged() {
         if (DOM.longpassphrase.val().trim().length > 0) {
             longpassphraseChanged();
+            return;
+        }
+        if (DOM.phrase.val().trim().length > 0) {
+            phraseChanged();
         }
     }
 
