@@ -38,7 +38,7 @@
     DOM.entropyType = DOM.entropyContainer.find(".type");
     DOM.entropyMnemonicLength = DOM.entropyContainer.find(".mnemonic-length");
     DOM.phrase = $(".phrase");
-    DOM.useSpecialEncryptionMode = $(".use-special-encryption-mode");
+    DOM.useEncodingMode = $(".use-encoding-mode");
     DOM.seed = $(".seed");
     DOM.rootKey = $(".root-key");
     DOM.litecoinLtubContainer = $(".litecoin-ltub-container");
@@ -115,7 +115,7 @@
         DOM.bip32Client.on("change", bip32ClientChanged);
         DOM.entropy.on("input", delayedEntropyChanged);
         DOM.useAdvanced.on("change", setAdvancedVisibility);
-        DOM.useSpecialEncryptionMode.on("change", specialEncryptionModeChanged);
+        DOM.useEncodingMode.on("change", encodingModeChanged);
         DOM.entropyMnemonicLength.on("change", longpassphraseChanged);
         DOM.more.on("click", showMore);
         DOM.litecoinUseLtub.on("change", litecoinUseLtubChanged);
@@ -236,35 +236,10 @@
         calcForDerivationPath();
     }
 
-    var previousEncryptionMode = "none";
-
-    function getShiftForMode(mode) {
-        if (mode === "t8cwd")   return 8;
-        if (mode === "shift16") return 16;
-        if (mode === "shift24") return 24;
-        return 0;
-    }
-
-    function specialEncryptionModeChanged() {
-        var newMode = DOM.useSpecialEncryptionMode.val();
-        if (!DOM.phrase.val()) {
-            previousEncryptionMode = newMode;
-            return;
+    function encodingModeChanged() {
+        if (DOM.longpassphrase.val().trim().length > 0) {
+            longpassphraseChanged();
         }
-        var currentPhrase = DOM.phrase.val();
-        // Undo previous encoding
-        var prevShift = getShiftForMode(previousEncryptionMode);
-        if (prevShift !== 0) {
-            currentPhrase = shiftMnemonicWords(currentPhrase, -prevShift);
-        }
-        // Apply new encoding
-        var newShift = getShiftForMode(newMode);
-        if (newShift !== 0) {
-            currentPhrase = shiftMnemonicWords(currentPhrase, newShift);
-        }
-        DOM.phrase.val(currentPhrase);
-        previousEncryptionMode = newMode;
-        phraseChanged();
     }
 
     function tabChanged() {
@@ -318,12 +293,69 @@
     }
     
     
+    function applyEncodingToPassphrase(passphrase) {
+        var mode = DOM.useEncodingMode.val();
+        if (mode === "none") {
+            // Default: SHA-256
+            var hash = sjcl.hash.sha256.hash(passphrase);
+            return sjcl.codec.hex.fromBits(hash);
+        }
+        else if (mode === "sha256") {
+            // SHA-256 (explicit)
+            var hash = sjcl.hash.sha256.hash(passphrase);
+            return sjcl.codec.hex.fromBits(hash);
+        }
+        else if (mode === "sha512") {
+            // SHA-512
+            var hash = sjcl.hash.sha512.hash(passphrase);
+            var fullHex = sjcl.codec.hex.fromBits(hash);
+            // Truncate to 256 bits (64 hex chars) for BIP39 entropy
+            return fullHex.substring(0, 64);
+        }
+        else if (mode === "double-sha256") {
+            // Double SHA-256: SHA-256(SHA-256(passphrase))
+            var hash1 = sjcl.hash.sha256.hash(passphrase);
+            var hash2 = sjcl.hash.sha256.hash(sjcl.codec.hex.fromBits(hash1));
+            return sjcl.codec.hex.fromBits(hash2);
+        }
+        else if (mode === "base64") {
+            // Base64 encode passphrase, then SHA-256
+            var encoded = btoa(unescape(encodeURIComponent(passphrase)));
+            var hash = sjcl.hash.sha256.hash(encoded);
+            return sjcl.codec.hex.fromBits(hash);
+        }
+        else if (mode === "hex") {
+            // Hex encode passphrase, then SHA-256
+            var hexStr = "";
+            for (var i = 0; i < passphrase.length; i++) {
+                hexStr += passphrase.charCodeAt(i).toString(16).padStart(2, "0");
+            }
+            var hash = sjcl.hash.sha256.hash(hexStr);
+            return sjcl.codec.hex.fromBits(hash);
+        }
+        else if (mode === "reverse") {
+            // Reverse words of passphrase, then SHA-256
+            var words = passphrase.split(/\s+/).filter(function(w) { return w.length > 0; });
+            var reversed = words.reverse().join(" ");
+            var hash = sjcl.hash.sha256.hash(reversed);
+            return sjcl.codec.hex.fromBits(hash);
+        }
+        else if (mode === "wordshift") {
+            // Word Shift: SHA-256 first, then shift mnemonic words (handled after mnemonic generation)
+            var hash = sjcl.hash.sha256.hash(passphrase);
+            return sjcl.codec.hex.fromBits(hash);
+        }
+        // Fallback
+        var hash = sjcl.hash.sha256.hash(passphrase);
+        return sjcl.codec.hex.fromBits(hash);
+    }
+
     function longpassphraseChanged() {
     	calcStrength();
-    	
+
     	if (DOM.longpassphrase.val().trim().length == 0) {
             clearDisplay();
- 
+
             DOM.phrase.val("");
             DOM.entropy.val("");
             DOM.seed.val("");
@@ -331,9 +363,8 @@
             phraseChanged();
             return;
         }
-        
-    	var hash = sjcl.hash.sha256.hash(DOM.longpassphrase.val());
-    	var hex = sjcl.codec.hex.fromBits(hash);
+
+    	var hex = applyEncodingToPassphrase(DOM.longpassphrase.val());
     	DOM.entropy.val(hex);
     	setMnemonicFromEntropy();
     	phraseChanged();
@@ -1223,31 +1254,25 @@
         phrase = encodeMnemonicIfRequired(phrase);
         // Set the mnemonic in the UI
         DOM.phrase.val(phrase);
-        previousEncryptionMode = DOM.useSpecialEncryptionMode.val();
+        // Encoding mode is tracked by the dropdown
         // Show the word indexes
         //showWordIndexes();
     }
 
     function encodeMnemonicIfRequired(phrase) {
-        var mode = DOM.useSpecialEncryptionMode.val();
-        var shift = getShiftForMode(mode);
-        if (shift === 0) return phrase;
-        return shiftMnemonicWords(phrase, shift);
+        var mode = DOM.useEncodingMode.val();
+        if (mode === "wordshift") {
+            return shiftMnemonicWords(phrase, 8);
+        }
+        return phrase;
     }
 
     function decodeMnemonicIfRequired(phrase) {
-        var mode = DOM.useSpecialEncryptionMode.val();
-        var shift = getShiftForMode(mode);
-        if (shift === 0) return phrase;
-        return shiftMnemonicWords(phrase, -shift);
-    }
-
-    function encodeSpecialMnemonic(phrase) {
-        return shiftMnemonicWords(phrase, 8);
-    }
-
-    function decodeSpecialMnemonic(phrase) {
-        return shiftMnemonicWords(phrase, -8);
+        var mode = DOM.useEncodingMode.val();
+        if (mode === "wordshift") {
+            return shiftMnemonicWords(phrase, -8);
+        }
+        return phrase;
     }
 
     function shiftMnemonicWords(phrase, shift) {
